@@ -1,0 +1,22 @@
+# AWS Configuration
+aws_region = "us-west-2"
+environment = "prod"
+
+# Network Configuration
+vpc_cidr = "10.0.0.0/16"
+public_subnet_cidrs = [
+  "10.0.1.0/24",
+  "10.0.2.0/24", 
+  "10.0.3.0/24"
+]
+private_subnet_cidrs = [
+  "10.0.10.0/24",
+  "10.0.11.0/24",
+  "10.0.12.0/24"
+]
+
+# Kubernetes Configuration
+kubernetes_version = "1.29.0"
+
+# SSH Key (replace with your public key)
+public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC... your-public-key-here"

@@ -1,0 +1,343 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+image:
+  repository: apache/ranger
+  tag: "2.4.0"
+  pullPolicy: IfNotPresent
+
+rangerAdmin:
+  replicaCount: 1
+  image:
+    repository: apache/ranger
+    tag: "2.4.0"
+    pullPolicy: IfNotPresent
+  
+  service:
+    type: ClusterIP
+    port: 6080
+    targetPort: 6080
+  
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    hosts:
+      - host: ranger.dataplatform.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: ranger-tls
+        hosts:
+          - ranger.dataplatform.local
+  
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+  
+  env:
+    RANGER_ADMIN_LDAP_URL: ""
+    RANGER_ADMIN_LDAP_BIND_DN: ""
+    RANGER_ADMIN_LDAP_BASE_DN: ""
+    RANGER_ADMIN_LDAP_USER_SEARCH_FILTER: ""
+    RANGER_DB_FLAVOR: "POSTGRES"
+  
+  persistence:
+    enabled: true
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 10Gi
+  
+  config:
+    ranger-admin-site.xml: |
+      <?xml version="1.0" encoding="UTF-8"?>
+      <configuration>
+        <property>
+          <name>ranger.jpa.jdbc.driver</name>
+          <value>org.postgresql.Driver</value>
+        </property>
+        <property>
+          <name>ranger.jpa.jdbc.url</name>
+          <value>jdbc:postgresql://ranger-postgresql:5432/ranger</value>
+        </property>
+        <property>
+          <name>ranger.jpa.jdbc.user</name>
+          <value>ranger</value>
+        </property>
+        <property>
+          <name>ranger.jpa.jdbc.password</name>
+          <value>ranger123</value>
+        </property>
+        <property>
+          <name>ranger.audit.solr.urls</name>
+          <value>http://ranger-solr:8983/solr/ranger_audits</value>
+        </property>
+        <property>
+          <name>ranger.authentication.method</name>
+          <value>UNIX</value>
+        </property>
+        <property>
+          <name>ranger.unixauth.service.hostname</name>
+          <value>ranger-admin</value>
+        </property>
+        <property>
+          <name>ranger.unixauth.service.port</name>
+          <value>5151</value>
+        </property>
+      </configuration>
+
+rangerUsersync:
+  enabled: true
+  replicaCount: 1
+  
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+  
+  config:
+    ranger-ugsync-site.xml: |
+      <?xml version="1.0" encoding="UTF-8"?>
+      <configuration>
+        <property>
+          <name>ranger.usersync.enabled</name>
+          <value>true</value>
+        </property>
+        <property>
+          <name>ranger.usersync.source.impl.class</name>
+          <value>org.apache.ranger.unixusersync.process.UnixUserGroupBuilder</value>
+        </property>
+        <property>
+          <name>ranger.usersync.policymgr.url</name>
+          <value>http://ranger-admin:6080</value>
+        </property>
+        <property>
+          <name>ranger.usersync.policymgr.username</name>
+          <value>admin</value>
+        </property>
+        <property>
+          <name>ranger.usersync.policymgr.password</name>
+          <value>admin123</value>
+        </property>
+      </configuration>
+
+postgresql:
+  enabled: true
+  auth:
+    enablePostgresUser: true
+    postgresPassword: "rangerdb123"
+    username: "ranger"
+    password: "ranger123"
+    database: "ranger"
+  primary:
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+    persistence:
+      enabled: true
+      size: 20Gi
+
+solr:
+  enabled: true
+  auth:
+    enabled: false
+  image:
+    repository: solr
+    tag: "8.11"
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  persistence:
+    enabled: true
+    size: 15Gi
+  
+  config:
+    solrConfig: |
+      <config>
+        <luceneMatchVersion>8.11</luceneMatchVersion>
+        <dataDir>${solr.data.dir:}</dataDir>
+        <directoryFactory name="DirectoryFactory" 
+                          class="${solr.directoryFactory:solr.NRTCachingDirectoryFactory}"/>
+        <codecFactory class="solr.SchemaCodecFactory"/>
+        <indexConfig>
+          <lockType>${solr.lock.type:native}</lockType>
+        </indexConfig>
+        <jmx />
+        <updateHandler class="solr.DirectUpdateHandler2">
+          <updateLog>
+            <str name="dir">${solr.ulog.dir:}</str>
+            <int name="numVersionBuckets">${solr.ulog.numVersionBuckets:65536}</int>
+          </updateLog>
+          <autoCommit>
+            <maxTime>${solr.autoCommit.maxTime:15000}</maxTime>
+            <openSearcher>false</openSearcher>
+          </autoCommit>
+          <autoSoftCommit>
+            <maxTime>${solr.autoSoftCommit.maxTime:1000}</maxTime>
+          </autoSoftCommit>
+        </updateHandler>
+        <query>
+          <maxBooleanClauses>1024</maxBooleanClauses>
+          <filterCache class="solr.FastLRUCache"
+                       size="512"
+                       initialSize="512"
+                       autowarmCount="0"/>
+          <queryResultCache class="solr.LRUCache"
+                           size="512"
+                           initialSize="512"
+                           autowarmCount="0"/>
+          <documentCache class="solr.LRUCache"
+                        size="512"
+                        initialSize="512"
+                        autowarmCount="0"/>
+          <cache name="perSegFilter"
+                 class="solr.search.LRUCache"
+                 size="10"
+                 initialSize="0"
+                 autowarmCount="10"
+                 regenerator="solr.NoOpRegenerator" />
+        </query>
+        <requestDispatcher handleSelect="false">
+          <requestParsers enableRemoteStreaming="true"
+                          multipartUploadLimitInKB="2048000"
+                          formdataUploadLimitInKB="2048"
+                          addHttpRequestToContext="false"/>
+          <httpCaching never304="true" />
+        </requestDispatcher>
+        <requestHandler name="/select" class="solr.SearchHandler">
+          <lst name="defaults">
+            <str name="echoParams">explicit</str>
+            <int name="rows">10</int>
+          </lst>
+        </requestHandler>
+        <requestHandler name="/query" class="solr.SearchHandler">
+          <lst name="defaults">
+            <str name="echoParams">explicit</str>
+            <str name="wt">json</str>
+            <str name="indent">true</str>
+          </lst>
+        </requestHandler>
+        <requestHandler name="/update" class="solr.UpdateRequestHandler" />
+        <requestHandler name="/admin/" class="solr.admin.AdminHandlers" />
+        <requestHandler name="/admin/ping" class="solr.PingRequestHandler">
+          <lst name="invariants">
+            <str name="q">solrpingquery</str>
+          </lst>
+          <lst name="defaults">
+            <str name="echoParams">all</str>
+          </lst>
+        </requestHandler>
+      </config>
+
+init:
+  enabled: true
+  adminUser:
+    username: admin
+    password: admin123
+    email: admin@dataplatform.local
+
+plugins:
+  trino:
+    enabled: true
+    config: |
+      ranger.plugin.trino.service.name=trino
+      ranger.plugin.trino.policy.source.impl=org.apache.ranger.admin.client.RangerAdminRESTClient
+      ranger.plugin.trino.policy.rest.url=http://ranger-admin:6080
+      ranger.plugin.trino.policy.rest.ssl.config.file=
+      ranger.plugin.trino.policy.pollIntervalMs=30000
+      ranger.plugin.trino.policy.cache.dir=/tmp/trino/policycache
+      xasecure.audit.is.enabled=true
+      xasecure.audit.destination.hdfs=false
+      xasecure.audit.destination.solr=true
+      xasecure.audit.destination.solr.urls=http://ranger-solr:8983/solr/ranger_audits
+
+  airflow:
+    enabled: true
+    config: |
+      ranger.plugin.airflow.service.name=airflow
+      ranger.plugin.airflow.policy.source.impl=org.apache.ranger.admin.client.RangerAdminRESTClient
+      ranger.plugin.airflow.policy.rest.url=http://ranger-admin:6080
+      ranger.plugin.airflow.policy.pollIntervalMs=30000
+
+affinity: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+
+livenessProbe:
+  httpGet:
+    path: /service/public/v2/api/health
+    port: http
+  initialDelaySeconds: 120
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /service/public/v2/api/health
+    port: http
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  labels:
+    app: ranger
+  interval: 30s
+  path: /service/public/v2/api/metrics
+
+networkPolicy:
+  enabled: false
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 6080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - protocol: TCP
+          port: 6080

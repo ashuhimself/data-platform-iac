@@ -1,0 +1,205 @@
+apiVersion: v1
+kind: SecretProviderClass
+metadata:
+  name: vault-database
+  namespace: default
+spec:
+  provider: vault
+  parameters:
+    vaultAddress: "https://vault.vault.svc.cluster.local:8200"
+    vaultCACertPath: "/vault/tls/ca.crt"
+    roleName: "dataplatform-app"
+    objects: |
+      - objectName: "db-username"
+        secretPath: "secret/data/database/postgresql"
+        secretKey: "username"
+      - objectName: "db-password"
+        secretPath: "secret/data/database/postgresql"
+        secretKey: "password"
+      - objectName: "clickhouse-password"
+        secretPath: "secret/data/database/clickhouse"
+        secretKey: "password"
+      - objectName: "trino-password"
+        secretPath: "secret/data/database/trino"
+        secretKey: "password"
+  secretObjects:
+  - secretName: database-credentials
+    type: Opaque
+    data:
+    - objectName: "db-username"
+      key: "username"
+    - objectName: "db-password"
+      key: "password"
+  - secretName: clickhouse-credentials
+    type: Opaque
+    data:
+    - objectName: "clickhouse-password"
+      key: "password"
+  - secretName: trino-credentials
+    type: Opaque
+    data:
+    - objectName: "trino-password"
+      key: "password"
+---
+apiVersion: v1
+kind: SecretProviderClass
+metadata:
+  name: vault-airflow-secrets
+  namespace: airflow
+spec:
+  provider: vault
+  parameters:
+    vaultAddress: "https://vault.vault.svc.cluster.local:8200"
+    vaultCACertPath: "/vault/tls/ca.crt"
+    roleName: "airflow-app"
+    objects: |
+      - objectName: "airflow-secret-key"
+        secretPath: "secret/data/airflow/config"
+        secretKey: "secret_key"
+      - objectName: "airflow-fernet-key"
+        secretPath: "secret/data/airflow/config"
+        secretKey: "fernet_key"
+      - objectName: "airflow-webserver-secret"
+        secretPath: "secret/data/airflow/config"
+        secretKey: "webserver_secret"
+      - objectName: "postgres-password"
+        secretPath: "secret/data/database/postgresql"
+        secretKey: "password"
+      - objectName: "redis-password"
+        secretPath: "secret/data/database/redis"
+        secretKey: "password"
+  secretObjects:
+  - secretName: airflow-config-secrets
+    type: Opaque
+    data:
+    - objectName: "airflow-secret-key"
+      key: "secret_key"
+    - objectName: "airflow-fernet-key"
+      key: "fernet_key"
+    - objectName: "airflow-webserver-secret"
+      key: "webserver_secret"
+  - secretName: airflow-database-secrets
+    type: Opaque
+    data:
+    - objectName: "postgres-password"
+      key: "postgres_password"
+    - objectName: "redis-password"
+      key: "redis_password"
+---
+apiVersion: v1
+kind: SecretProviderClass
+metadata:
+  name: vault-superset-secrets
+  namespace: superset
+spec:
+  provider: vault
+  parameters:
+    vaultAddress: "https://vault.vault.svc.cluster.local:8200"
+    vaultCACertPath: "/vault/tls/ca.crt"
+    roleName: "superset-app"
+    objects: |
+      - objectName: "superset-secret-key"
+        secretPath: "secret/data/superset/config"
+        secretKey: "secret_key"
+      - objectName: "postgres-password"
+        secretPath: "secret/data/database/postgresql"
+        secretKey: "password"
+      - objectName: "redis-password"
+        secretPath: "secret/data/database/redis"
+        secretKey: "password"
+  secretObjects:
+  - secretName: superset-config-secrets
+    type: Opaque
+    data:
+    - objectName: "superset-secret-key"
+      key: "secret_key"
+  - secretName: superset-database-secrets
+    type: Opaque
+    data:
+    - objectName: "postgres-password"
+      key: "postgres_password"
+    - objectName: "redis-password"
+      key: "redis_password"
+---
+apiVersion: v1
+kind: SecretProviderClass
+metadata:
+  name: vault-ranger-secrets
+  namespace: ranger
+spec:
+  provider: vault
+  parameters:
+    vaultAddress: "https://vault.vault.svc.cluster.local:8200"
+    vaultCACertPath: "/vault/tls/ca.crt"
+    roleName: "ranger-app"
+    objects: |
+      - objectName: "ranger-admin-password"
+        secretPath: "secret/data/ranger/config"
+        secretKey: "admin_password"
+      - objectName: "postgres-password"
+        secretPath: "secret/data/database/postgresql"
+        secretKey: "password"
+  secretObjects:
+  - secretName: ranger-config-secrets
+    type: Opaque
+    data:
+    - objectName: "ranger-admin-password"
+      key: "admin_password"
+  - secretName: ranger-database-secrets
+    type: Opaque
+    data:
+    - objectName: "postgres-password"
+      key: "postgres_password"
+---
+apiVersion: v1
+kind: SecretProviderClass
+metadata:
+  name: vault-airbyte-secrets
+  namespace: airbyte
+spec:
+  provider: vault
+  parameters:
+    vaultAddress: "https://vault.vault.svc.cluster.local:8200"
+    vaultCACertPath: "/vault/tls/ca.crt"
+    roleName: "airbyte-app"
+    objects: |
+      - objectName: "airbyte-database-password"
+        secretPath: "secret/data/airbyte/config"
+        secretKey: "database_password"
+      - objectName: "airbyte-database-username"
+        secretPath: "secret/data/airbyte/config"
+        secretKey: "database_username"
+      - objectName: "minio-access-key"
+        secretPath: "secret/data/airbyte/config"
+        secretKey: "minio_access_key"
+      - objectName: "minio-secret-key"
+        secretPath: "secret/data/airbyte/config"
+        secretKey: "minio_secret_key"
+      - objectName: "admin-username"
+        secretPath: "secret/data/airbyte/config"
+        secretKey: "admin_username"
+      - objectName: "admin-password"
+        secretPath: "secret/data/airbyte/config"
+        secretKey: "admin_password"
+  secretObjects:
+  - secretName: airbyte-database-secrets
+    type: Opaque
+    data:
+    - objectName: "airbyte-database-password"
+      key: "database-password"
+    - objectName: "airbyte-database-username"
+      key: "database-username"
+  - secretName: airbyte-storage-secrets
+    type: Opaque
+    data:
+    - objectName: "minio-access-key"
+      key: "access-key"
+    - objectName: "minio-secret-key"
+      key: "secret-key"
+  - secretName: airbyte-admin-secrets
+    type: Opaque
+    data:
+    - objectName: "admin-username"
+      key: "admin-username"
+    - objectName: "admin-password"
+      key: "admin-password"

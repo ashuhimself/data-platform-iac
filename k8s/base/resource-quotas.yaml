@@ -1,0 +1,217 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: airflow-resource-quota
+  namespace: airflow
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    persistentvolumeclaims: "10"
+    requests.storage: 100Gi
+    pods: "20"
+    services: "10"
+    secrets: "20"
+    configmaps: "20"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: clickhouse-resource-quota
+  namespace: clickhouse
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    persistentvolumeclaims: "5"
+    requests.storage: 200Gi
+    pods: "10"
+    services: "5"
+    secrets: "10"
+    configmaps: "10"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: trino-resource-quota
+  namespace: trino
+spec:
+  hard:
+    requests.cpu: "6"
+    requests.memory: 12Gi
+    limits.cpu: "12"
+    limits.memory: 24Gi
+    persistentvolumeclaims: "3"
+    requests.storage: 50Gi
+    pods: "15"
+    services: "5"
+    secrets: "10"
+    configmaps: "10"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: superset-resource-quota
+  namespace: superset
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    persistentvolumeclaims: "5"
+    requests.storage: 50Gi
+    pods: "10"
+    services: "5"
+    secrets: "10"
+    configmaps: "10"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ranger-resource-quota
+  namespace: ranger
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.cpu: "4"
+    limits.memory: 8Gi
+    persistentvolumeclaims: "5"
+    requests.storage: 50Gi
+    pods: "10"
+    services: "5"
+    secrets: "10"
+    configmaps: "10"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: vault-resource-quota
+  namespace: vault
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.cpu: "4"
+    limits.memory: 8Gi
+    persistentvolumeclaims: "5"
+    requests.storage: 50Gi
+    pods: "10"
+    services: "5"
+    secrets: "10"
+    configmaps: "10"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: monitoring-resource-quota
+  namespace: monitoring
+spec:
+  hard:
+    requests.cpu: "6"
+    requests.memory: 12Gi
+    limits.cpu: "12"
+    limits.memory: 24Gi
+    persistentvolumeclaims: "10"
+    requests.storage: 200Gi
+    pods: "20"
+    services: "10"
+    secrets: "20"
+    configmaps: "20"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: observability-resource-quota
+  namespace: observability
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    persistentvolumeclaims: "5"
+    requests.storage: 100Gi
+    pods: "15"
+    services: "8"
+    secrets: "15"
+    configmaps: "15"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-limit-range
+  namespace: default
+spec:
+  limits:
+  - default:
+      cpu: 500m
+      memory: 1Gi
+    defaultRequest:
+      cpu: 100m
+      memory: 128Mi
+    type: Container
+  - default:
+      storage: 10Gi
+    type: PersistentVolumeClaim
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: airflow-limit-range
+  namespace: airflow
+spec:
+  limits:
+  - default:
+      cpu: 1000m
+      memory: 2Gi
+    defaultRequest:
+      cpu: 250m
+      memory: 512Mi
+    max:
+      cpu: 4000m
+      memory: 8Gi
+    min:
+      cpu: 100m
+      memory: 128Mi
+    type: Container
+  - default:
+      storage: 20Gi
+    max:
+      storage: 100Gi
+    min:
+      storage: 1Gi
+    type: PersistentVolumeClaim
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: database-limit-range
+  namespace: clickhouse
+spec:
+  limits:
+  - default:
+      cpu: 2000m
+      memory: 4Gi
+    defaultRequest:
+      cpu: 500m
+      memory: 1Gi
+    max:
+      cpu: 4000m
+      memory: 8Gi
+    min:
+      cpu: 250m
+      memory: 512Mi
+    type: Container
+  - default:
+      storage: 50Gi
+    max:
+      storage: 200Gi
+    min:
+      storage: 10Gi
+    type: PersistentVolumeClaim

@@ -1,0 +1,168 @@
+# CPU/RAM Sizing Configuration for Data Platform
+# All instances use latest stable AMI available at deployment time
+
+clusters:
+  # Service Clusters - Each has 1 master + 2 workers
+  airflow:
+    master:
+      instance_type: "t3.large"
+      vcpu: 2
+      memory_gb: 8
+      storage_gb: 50
+    workers:
+      instance_type: "m5.2xlarge" 
+      vcpu: 8
+      memory_gb: 32
+      storage_gb: 100
+      count: 2
+    
+  clickhouse:
+    master:
+      instance_type: "t3.large"
+      vcpu: 2
+      memory_gb: 8
+      storage_gb: 50
+    workers:
+      instance_type: "m5.2xlarge"
+      vcpu: 8
+      memory_gb: 32
+      storage_gb: 200  # Higher storage for analytical data
+      count: 2
+      
+  trino:
+    master:
+      instance_type: "t3.large"
+      vcpu: 2
+      memory_gb: 8
+      storage_gb: 50
+    workers:
+      instance_type: "m5.2xlarge"
+      vcpu: 8
+      memory_gb: 32
+      storage_gb: 100
+      count: 2
+      
+  superset:
+    master:
+      instance_type: "t3.large"
+      vcpu: 2
+      memory_gb: 8
+      storage_gb: 50
+    workers:
+      instance_type: "m5.large"  # Lighter workload for BI
+      vcpu: 2
+      memory_gb: 8
+      storage_gb: 50
+      count: 2
+      
+  ranger:
+    master:
+      instance_type: "t3.large"
+      vcpu: 2
+      memory_gb: 8
+      storage_gb: 50
+    workers:
+      instance_type: "m5.large"  # Lighter workload for governance
+      vcpu: 2
+      memory_gb: 8
+      storage_gb: 50
+      count: 2
+      
+  airbyte:
+    master:
+      instance_type: "t3.large"
+      vcpu: 2
+      memory_gb: 8
+      storage_gb: 50
+    workers:
+      instance_type: "m5.2xlarge"  # Higher resources for data ingestion workloads
+      vcpu: 8
+      memory_gb: 32
+      storage_gb: 150  # Extra storage for logs and temporary data
+      count: 2
+
+# Central Monitoring VM - Single instance for all observability
+monitoring:
+  instance_type: "m5.4xlarge"
+  vcpu: 16
+  memory_gb: 64
+  storage_gb: 500  # Large storage for metrics, logs, and lineage data
+  services:
+    - prometheus
+    - grafana
+    - loki
+    - marquez  # OpenLineage
+
+# Network Configuration
+network:
+  vpc_cidr: "10.0.0.0/16"
+  availability_zones: 3
+  public_subnets:
+    - "10.0.1.0/24"
+    - "10.0.2.0/24" 
+    - "10.0.3.0/24"
+  private_subnets:
+    - "10.0.10.0/24"
+    - "10.0.11.0/24"
+    - "10.0.12.0/24"
+
+# Kubernetes Resource Requests/Limits per Service
+kubernetes_resources:
+  airflow:
+    webserver:
+      requests: { cpu: "500m", memory: "1Gi" }
+      limits: { cpu: "2", memory: "4Gi" }
+    scheduler:
+      requests: { cpu: "500m", memory: "1Gi" }
+      limits: { cpu: "2", memory: "4Gi" }
+    workers:
+      requests: { cpu: "1", memory: "2Gi" }
+      limits: { cpu: "4", memory: "8Gi" }
+      
+  clickhouse:
+    requests: { cpu: "2", memory: "4Gi" }
+    limits: { cpu: "6", memory: "16Gi" }
+    
+  trino:
+    coordinator:
+      requests: { cpu: "1", memory: "2Gi" }
+      limits: { cpu: "4", memory: "8Gi" }
+    workers:
+      requests: { cpu: "2", memory: "4Gi" }
+      limits: { cpu: "6", memory: "16Gi" }
+      
+  superset:
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits: { cpu: "2", memory: "4Gi" }
+    
+  ranger:
+    admin:
+      requests: { cpu: "500m", memory: "1Gi" }
+      limits: { cpu: "2", memory: "4Gi" }
+    usersync:
+      requests: { cpu: "200m", memory: "512Mi" }
+      limits: { cpu: "1", memory: "2Gi" }
+      
+  airbyte:
+    webapp:
+      requests: { cpu: "500m", memory: "1Gi" }
+      limits: { cpu: "1500m", memory: "2Gi" }
+    server:
+      requests: { cpu: "1", memory: "2Gi" }
+      limits: { cpu: "3", memory: "4Gi" }
+    worker:
+      requests: { cpu: "1", memory: "2Gi" }
+      limits: { cpu: "4", memory: "8Gi" }
+    temporal:
+      requests: { cpu: "500m", memory: "1Gi" }
+      limits: { cpu: "2", memory: "4Gi" }
+
+# Storage Classes
+storage:
+  classes:
+    - name: "gp3-retain"
+      type: "gp3"
+      reclaim_policy: "Retain"
+    - name: "gp3-delete" 
+      type: "gp3"
+      reclaim_policy: "Delete"

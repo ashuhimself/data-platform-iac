@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dbt-profiles
+  namespace: airflow
+data:
+  profiles.yml: |
+    data_platform:
+      outputs:
+        clickhouse:
+          type: clickhouse
+          host: "{{ env_var('CLICKHOUSE_HOST') }}"
+          port: 9000
+          user: "{{ env_var('CLICKHOUSE_USER') }}"
+          password: "{{ env_var('CLICKHOUSE_PASSWORD') }}"
+          database: analytics
+          schema: dbt
+          secure: true
+          verify: false
+          
+        trino:
+          type: trino
+          host: "{{ env_var('TRINO_HOST') }}"
+          port: 8080
+          user: "{{ env_var('TRINO_USER') }}"
+          password: "{{ env_var('TRINO_PASSWORD') }}"
+          catalog: clickhouse
+          schema: dbt
+          http_scheme: http
+          
+        dev:
+          type: clickhouse
+          host: "{{ env_var('CLICKHOUSE_HOST') }}"
+          port: 9000
+          user: "{{ env_var('CLICKHOUSE_USER') }}"
+          password: "{{ env_var('CLICKHOUSE_PASSWORD') }}"
+          database: analytics_dev
+          schema: dbt_dev
+          secure: true
+          verify: false
+          
+      target: clickhouse
+
+  dbt_project.yml: |
+    name: 'data_platform'
+    version: '1.0.0'
+    config-version: 2
+
+    profile: 'data_platform'
+
+    model-paths: ["models"]
+    analysis-paths: ["analysis"]
+    test-paths: ["tests"]
+    seed-paths: ["data"]
+    macro-paths: ["macros"]
+    snapshot-paths: ["snapshots"]
+
+    target-path: "target"
+    clean-targets:
+      - "target"
+      - "dbt_packages"
+
+    models:
+      data_platform:
+        +materialized: table
+        staging:
+          +materialized: view
+        marts:
+          +materialized: table
+          
+    vars:
+      # dbt variables for environment-specific configs
+      start_date: '2024-01-01'
+      end_date: '2024-12-31'
+      
+    on-run-start:
+      - "{{ log('Starting dbt run', info=true) }}"
+      
+    on-run-end:
+      - "{{ log('Completed dbt run', info=true) }}"

@@ -1,0 +1,340 @@
+# Trino Helm Chart Values
+# Uses latest stable Trino version available at deployment time
+
+# Trino configuration
+image:
+  repository: trinodb/trino
+  tag: "435"  # Update to latest stable at deployment
+  pullPolicy: IfNotPresent
+
+# Cluster configuration
+server:
+  node:
+    environment: production
+    dataDir: /data/trino
+    pluginDir: /usr/lib/trino/plugin
+
+  log:
+    trino:
+      level: INFO
+    
+  config:
+    path: /etc/trino
+    http:
+      port: 8080
+    https:
+      enabled: false
+    processForwarded: false
+    maxRequestHeaderSize: "1MB"
+
+  # JVM configuration
+  jvm:
+    maxHeapSize: "8G"
+    gcMethod:
+      type: "UseG1GC"
+      g1:
+        heapRegionSize: "32M"
+
+  # Exchange manager for spilling
+  exchangeManager:
+    name: "filesystem"
+    baseDir: "/tmp/trino-local-file-system-exchange-manager"
+
+# Coordinator configuration
+coordinator:
+  replicas: 1
+  
+  resources:
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+
+  # Coordinator specific configuration
+  config: |
+    coordinator=true
+    node-scheduler.include-coordinator=false
+    http-server.http.port=8080
+    discovery.uri=http://trino-coordinator:8080
+    query.max-memory=8GB
+    query.max-memory-per-node=2GB
+    query.max-total-memory=12GB
+    memory.heap-headroom-per-node=1GB
+
+  # Discovery service
+  service:
+    type: LoadBalancer
+    port: 8080
+
+# Worker configuration
+worker:
+  replicas: 3
+  
+  resources:
+    requests:
+      cpu: "2"
+      memory: "4Gi"
+    limits:
+      cpu: "6"
+      memory: "16Gi"
+
+  # Worker specific configuration
+  config: |
+    coordinator=false
+    http-server.http.port=8080
+    discovery.uri=http://trino-coordinator:8080
+    query.max-memory-per-node=12GB
+    memory.heap-headroom-per-node=2GB
+
+# Catalogs configuration
+catalogs:
+  # ClickHouse catalog
+  clickhouse.properties: |
+    connector.name=clickhouse
+    connection-url=jdbc:clickhouse://clickhouse-service.clickhouse.svc.cluster.local:8123/analytics
+    connection-user=trino
+    connection-password=${ENV:CLICKHOUSE_PASSWORD}
+    clickhouse.map-string-as-varchar=true
+
+  # Memory catalog for testing
+  memory.properties: |
+    connector.name=memory
+
+  # System catalog (built-in)
+  system.properties: |
+    connector.name=system
+
+  # JMX catalog for monitoring
+  jmx.properties: |
+    connector.name=jmx
+
+# Access control
+accessControl:
+  type: "allow-all"  # For development; use file-based or integration with Ranger for production
+  
+  # File-based access control configuration
+  rules: |
+    {
+      "catalogs": [
+        {
+          "catalog": "clickhouse",
+          "allow": "all"
+        },
+        {
+          "catalog": "memory",
+          "allow": "all"
+        },
+        {
+          "catalog": "system",
+          "allow": "all"
+        }
+      ]
+    }
+
+# Authentication
+auth:
+  # For development; integrate with LDAP/OAuth for production
+  enabled: false
+  
+# Password authentication configuration
+passwordAuth:
+  enabled: false
+  users:
+    - username: admin
+      password: admin123
+    - username: analyst
+      password: analyst123
+
+# LDAP authentication (commented out for development)
+# ldapAuth:
+#   enabled: false
+#   url: "ldaps://ldap.example.com:636"
+#   userBindSearchPattern: "uid=${USER},ou=users,dc=example,dc=com"
+
+# Environment variables
+env:
+  - name: CLICKHOUSE_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: clickhouse-credentials
+        key: password
+
+# Additional JVM arguments
+additionalJVMConfig: |
+  -XX:+UseContainerSupport
+  -XX:MaxRAMPercentage=80.0
+  -XX:+ExitOnOutOfMemoryError
+  -Djdk.attach.allowAttachSelf=true
+
+# Node selection and tolerations
+nodeSelector:
+  trino-cluster: "true"
+
+tolerations:
+  - key: "trino-cluster"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+
+# Security context
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Persistence for exchange manager
+persistence:
+  enabled: true
+  size: 100Gi
+  storageClass: gp3-retain
+  accessMode: ReadWriteOnce
+
+# Monitoring
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: trino
+    labels:
+      app: trino
+    interval: 30s
+    path: /v1/info
+
+# Service account for Vault authentication
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT:role/trino-service-role"
+
+# Ingress configuration (optional)
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  hosts:
+    - host: trino.data-platform.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Resource quotas
+quotas:
+  pods: "10"
+  requests.cpu: "12"
+  requests.memory: "24Gi"
+  limits.cpu: "28"
+  limits.memory: "72Gi"
+
+# Anti-affinity rules
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values:
+            - trino
+        topologyKey: kubernetes.io/hostname
+
+# Event listener for lineage tracking
+eventListener:
+  enabled: true
+  config: |
+    event-listener.name=trino-lineage
+    trino-lineage.openlineage.uri=http://marquez.monitoring.svc.cluster.local:5000
+    trino-lineage.openlineage.namespace=trino
+
+# Session properties
+sessionPropertyConfig: |
+  {
+    "sessionPropertyConfigurationManagerPlugins": [
+      {
+        "name": "file",
+        "properties": {
+          "session-property-configuration.db-file": "/etc/trino/session-property-config.db"
+        }
+      }
+    ]
+  }
+
+# Query logging
+queryLogging:
+  enabled: true
+  format: "JSON"
+  file: "/var/log/trino/http-request.log"
+
+# Fault tolerant execution
+faultTolerantExecution:
+  enabled: true
+  exchangeManagerName: "filesystem"
+  taskPartitionedOutputBufferSize: "1GB"
+  taskRetryAttemptsPerTask: 4
+
+# Graceful shutdown
+gracefulShutdown:
+  enabled: true
+  shutdownGracePeriodSeconds: 120
+
+# Extra configuration files
+extraConfigFiles:
+  resource-groups.properties: |
+    resource-groups.configuration-manager=file
+    resource-groups.config-file=/etc/trino/resource-groups.json
+
+  resource-groups.json: |
+    {
+      "rootGroups": [
+        {
+          "name": "global",
+          "softMemoryLimit": "80%",
+          "hardConcurrencyLimit": 100,
+          "maxQueued": 100,
+          "jmxExport": true,
+          "subGroups": [
+            {
+              "name": "admin",
+              "softMemoryLimit": "30%",
+              "hardConcurrencyLimit": 20,
+              "maxQueued": 10
+            },
+            {
+              "name": "analytics",
+              "softMemoryLimit": "50%",
+              "hardConcurrencyLimit": 30,
+              "maxQueued": 20
+            },
+            {
+              "name": "adhoc",
+              "softMemoryLimit": "20%",
+              "hardConcurrencyLimit": 10,
+              "maxQueued": 5
+            }
+          ]
+        }
+      ],
+      "selectors": [
+        {
+          "user": "admin",
+          "group": "global.admin"
+        },
+        {
+          "source": ".*airflow.*",
+          "group": "global.analytics"
+        },
+        {
+          "group": "global.adhoc"
+        }
+      ]
+    }

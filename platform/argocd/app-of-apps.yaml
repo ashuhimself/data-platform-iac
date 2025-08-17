@@ -1,0 +1,104 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dataplatform-apps
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/dataplatform
+    path: platform/argocd/applications
+    targetRevision: HEAD
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: dataplatform
+  namespace: argocd
+spec:
+  description: Data Platform Applications
+  sourceRepos:
+    - 'https://github.com/your-org/dataplatform'
+    - 'https://airflow.apache.org'
+    - 'https://clickhouse.github.io/clickhouse-kubernetes'
+    - 'https://trinodb.github.io/charts'
+    - 'https://prometheus-community.github.io/helm-charts'
+    - 'https://grafana.github.io/helm-charts'
+    - 'https://apache.github.io/superset'
+    - 'https://ranger.apache.org'
+    - 'https://helm.releases.hashicorp.com'
+    - 'https://airbytehq.github.io/helm-charts'
+  destinations:
+    - namespace: airflow
+      server: https://kubernetes.default.svc
+    - namespace: airbyte
+      server: https://kubernetes.default.svc
+    - namespace: clickhouse
+      server: https://kubernetes.default.svc
+    - namespace: trino
+      server: https://kubernetes.default.svc
+    - namespace: superset
+      server: https://kubernetes.default.svc
+    - namespace: ranger
+      server: https://kubernetes.default.svc
+    - namespace: monitoring
+      server: https://kubernetes.default.svc
+    - namespace: observability
+      server: https://kubernetes.default.svc
+    - namespace: vault
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+    - group: policy
+      kind: PodSecurityPolicy
+    - group: storage.k8s.io
+      kind: StorageClass
+  namespaceResourceWhitelist:
+    - group: ''
+      kind: '*'
+    - group: apps
+      kind: '*'
+    - group: extensions
+      kind: '*'
+    - group: networking.k8s.io
+      kind: '*'
+    - group: monitoring.coreos.com
+      kind: '*'
+    - group: batch
+      kind: '*'
+  roles:
+    - name: dataplatform-admin
+      description: Admin role for data platform
+      policies:
+        - p, proj:dataplatform:dataplatform-admin, applications, *, dataplatform/*, allow
+        - p, proj:dataplatform:dataplatform-admin, repositories, *, *, allow
+        - p, proj:dataplatform:dataplatform-admin, clusters, *, *, allow
+      groups:
+        - dataplatform:admins
+    - name: dataplatform-dev
+      description: Developer role for data platform
+      policies:
+        - p, proj:dataplatform:dataplatform-dev, applications, get, dataplatform/*, allow
+        - p, proj:dataplatform:dataplatform-dev, applications, sync, dataplatform/*, allow
+      groups:
+        - dataplatform:developers

@@ -1,0 +1,188 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vault-roles-setup
+  namespace: vault
+spec:
+  template:
+    spec:
+      serviceAccountName: vault-auth
+      restartPolicy: OnFailure
+      containers:
+      - name: vault-roles-setup
+        image: hashicorp/vault:1.15.2
+        env:
+        - name: VAULT_ADDR
+          value: "https://vault.vault.svc.cluster.local:8200"
+        - name: VAULT_CACERT
+          value: "/vault/userconfig/vault-tls/ca.crt"
+        - name: VAULT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: vault-init-secret
+              key: root-token
+        volumeMounts:
+        - name: vault-tls
+          mountPath: /vault/userconfig/vault-tls
+          readOnly: true
+        - name: policies
+          mountPath: /policies
+          readOnly: true
+        command:
+        - /bin/sh
+        - -c
+        - |
+          # Wait for Vault to be ready
+          until vault status > /dev/null 2>&1; do
+            echo "Waiting for Vault to be ready..."
+            sleep 5
+          done
+          
+          # Enable KV secrets engine
+          vault secrets enable -path=secret kv-v2 || true
+          
+          # Create policies
+          echo "Creating Vault policies..."
+          
+          # Airflow policy
+          vault policy write airflow-policy - <<EOF
+          path "secret/data/airflow/*" {
+            capabilities = ["read", "list"]
+          }
+          path "secret/data/database/postgresql" {
+            capabilities = ["read"]
+          }
+          path "secret/data/database/redis" {
+            capabilities = ["read"]
+          }
+          EOF
+          
+          # Airbyte policy
+          vault policy write airbyte-policy - <<EOF
+          path "secret/data/airbyte/*" {
+            capabilities = ["read", "list"]
+          }
+          path "secret/data/database/postgresql" {
+            capabilities = ["read"]
+          }
+          path "secret/data/database/minio" {
+            capabilities = ["read"]
+          }
+          EOF
+          
+          # Superset policy
+          vault policy write superset-policy - <<EOF
+          path "secret/data/superset/*" {
+            capabilities = ["read", "list"]
+          }
+          path "secret/data/database/postgresql" {
+            capabilities = ["read"]
+          }
+          path "secret/data/database/redis" {
+            capabilities = ["read"]
+          }
+          EOF
+          
+          # Trino policy
+          vault policy write trino-policy - <<EOF
+          path "secret/data/trino/*" {
+            capabilities = ["read", "list"]
+          }
+          path "secret/data/database/trino" {
+            capabilities = ["read"]
+          }
+          EOF
+          
+          # ClickHouse policy
+          vault policy write clickhouse-policy - <<EOF
+          path "secret/data/clickhouse/*" {
+            capabilities = ["read", "list"]
+          }
+          path "secret/data/database/clickhouse" {
+            capabilities = ["read"]
+          }
+          EOF
+          
+          # Ranger policy
+          vault policy write ranger-policy - <<EOF
+          path "secret/data/ranger/*" {
+            capabilities = ["read", "list"]
+          }
+          path "secret/data/database/postgresql" {
+            capabilities = ["read"]
+          }
+          EOF
+          
+          # Data Platform general policy
+          vault policy write dataplatform-policy - <<EOF
+          path "secret/data/dataplatform/*" {
+            capabilities = ["read", "list"]
+          }
+          path "secret/data/database/*" {
+            capabilities = ["read"]
+          }
+          path "secret/data/certificates/*" {
+            capabilities = ["read", "list"]
+          }
+          EOF
+          
+          # Create Kubernetes roles
+          echo "Creating Kubernetes authentication roles..."
+          
+          # Airflow role
+          vault write auth/kubernetes/role/airflow-app \
+            bound_service_account_names=airflow \
+            bound_service_account_namespaces=airflow \
+            policies=airflow-policy \
+            ttl=24h
+          
+          # Airbyte role
+          vault write auth/kubernetes/role/airbyte-app \
+            bound_service_account_names=airbyte-admin \
+            bound_service_account_namespaces=airbyte \
+            policies=airbyte-policy \
+            ttl=24h
+          
+          # Superset role
+          vault write auth/kubernetes/role/superset-app \
+            bound_service_account_names=superset \
+            bound_service_account_namespaces=superset \
+            policies=superset-policy \
+            ttl=24h
+          
+          # Trino role
+          vault write auth/kubernetes/role/trino-app \
+            bound_service_account_names=trino \
+            bound_service_account_namespaces=trino \
+            policies=trino-policy \
+            ttl=24h
+          
+          # ClickHouse role
+          vault write auth/kubernetes/role/clickhouse-app \
+            bound_service_account_names=clickhouse \
+            bound_service_account_namespaces=clickhouse \
+            policies=clickhouse-policy \
+            ttl=24h
+          
+          # Ranger role
+          vault write auth/kubernetes/role/ranger-app \
+            bound_service_account_names=ranger \
+            bound_service_account_namespaces=ranger \
+            policies=ranger-policy \
+            ttl=24h
+          
+          # General data platform role
+          vault write auth/kubernetes/role/dataplatform-app \
+            bound_service_account_names=default \
+            bound_service_account_namespaces=default,airflow,airbyte,superset,trino,clickhouse,ranger \
+            policies=dataplatform-policy \
+            ttl=24h
+          
+          echo "Vault roles and policies configured successfully"
+      volumes:
+      - name: vault-tls
+        secret:
+          secretName: vault-tls
+      - name: policies
+        configMap:
+          name: vault-policies

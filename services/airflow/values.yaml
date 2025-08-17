@@ -1,0 +1,315 @@
+# Airflow Helm Chart Values with dbt Integration
+# Uses latest stable Airflow version available at deployment time
+
+# Airflow configuration
+airflow:
+  # Use latest stable image
+  image:
+    repository: apache/airflow
+    tag: "2.8.1"  # Update to latest stable at deployment
+    pullPolicy: IfNotPresent
+
+  # Airflow configuration
+  config:
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql://airflow:airflow@airflow-postgresql:5432/airflow"
+    AIRFLOW__CELERY__RESULT_BACKEND: "redis://airflow-redis:6379/0"
+    AIRFLOW__CELERY__BROKER_URL: "redis://airflow-redis:6379/0"
+    AIRFLOW__CORE__FERNET_KEY: ""  # Will be provided by Vault
+    AIRFLOW__WEBSERVER__SECRET_KEY: ""  # Will be provided by Vault
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: "16"
+    AIRFLOW__CORE__DAG_CONCURRENCY: "16"
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "16"
+    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "300"
+    AIRFLOW__WEBSERVER__RBAC: "true"
+    AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth"
+    AIRFLOW__LOGGING__REMOTE_LOGGING: "true"
+    AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER: "s3://airflow-logs-bucket/logs"
+    AIRFLOW__LOGGING__REMOTE_LOG_CONN_ID: "aws_default"
+
+# Webserver configuration
+webserver:
+  replicas: 2
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+  
+  service:
+    type: LoadBalancer
+    ports:
+      - name: airflow-ui
+        port: 8080
+        targetPort: 8080
+        protocol: TCP
+
+  # Enable authentication
+  defaultUser:
+    enabled: true
+    role: Admin
+    username: admin
+    email: admin@example.com
+    firstName: admin
+    lastName: user
+    password: admin  # Change in production
+
+# Scheduler configuration
+scheduler:
+  replicas: 2
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+
+# Worker configuration
+workers:
+  replicas: 3
+  resources:
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+
+  # Worker pod template for dbt tasks
+  podTemplate: |
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: worker-pod
+    spec:
+      containers:
+        - name: airflow-worker
+          image: apache/airflow:2.8.1-python3.11
+          env:
+            - name: DBT_PROFILES_DIR
+              value: "/opt/airflow/dbt"
+          volumeMounts:
+            - name: dbt-profiles
+              mountPath: /opt/airflow/dbt
+            - name: vault-secrets
+              mountPath: /opt/airflow/secrets
+      volumes:
+        - name: dbt-profiles
+          configMap:
+            name: dbt-profiles
+        - name: vault-secrets
+          csi:
+            driver: secrets-store.csi.x-k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: airflow-secrets
+
+# DAGs configuration
+dags:
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClassName: gp3-retain
+    accessMode: ReadWriteMany
+
+  gitSync:
+    enabled: true
+    repo: https://github.com/your-org/airflow-dags.git
+    branch: main
+    subPath: ""
+    wait: 60
+    maxFailures: 0
+
+# PostgreSQL database for Airflow metadata
+postgresql:
+  enabled: true
+  auth:
+    enablePostgresUser: true
+    postgresPassword: airflow
+    username: airflow
+    password: airflow
+    database: airflow
+  
+  primary:
+    persistence:
+      enabled: true
+      size: 100Gi
+      storageClass: gp3-retain
+    
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+
+# Redis for Celery
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  
+  master:
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClass: gp3-retain
+    
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "512Mi"
+      limits:
+        cpu: "1"
+        memory: "2Gi"
+
+# dbt configuration
+dbt:
+  # Custom image with dbt installed
+  image:
+    repository: dbtlabs/dbt-core
+    tag: "1.7.0"  # Update to latest stable at deployment
+  
+  # dbt profiles for connecting to ClickHouse and Trino
+  profiles:
+    profiles.yml: |
+      data_platform:
+        outputs:
+          clickhouse:
+            type: clickhouse
+            host: "{{ var('clickhouse_host') }}"
+            port: 9000
+            user: "{{ var('clickhouse_user') }}"
+            password: "{{ var('clickhouse_password') }}"
+            database: analytics
+            schema: dbt
+            secure: true
+          
+          trino:
+            type: trino
+            host: "{{ var('trino_host') }}"
+            port: 8080
+            user: "{{ var('trino_user') }}"
+            password: "{{ var('trino_password') }}"
+            catalog: clickhouse
+            schema: dbt
+            
+        target: clickhouse
+
+# Environment variables for dbt connections
+env:
+  - name: DBT_PROFILES_DIR
+    value: "/opt/airflow/dbt"
+  - name: CLICKHOUSE_HOST
+    valueFrom:
+      secretKeyRef:
+        name: clickhouse-credentials
+        key: host
+  - name: CLICKHOUSE_USER
+    valueFrom:
+      secretKeyRef:
+        name: clickhouse-credentials
+        key: username
+  - name: CLICKHOUSE_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: clickhouse-credentials
+        key: password
+  - name: TRINO_HOST
+    valueFrom:
+      secretKeyRef:
+        name: trino-credentials
+        key: host
+  - name: TRINO_USER
+    valueFrom:
+      secretKeyRef:
+        name: trino-credentials
+        key: username
+  - name: TRINO_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: trino-credentials
+        key: password
+
+# Extra packages to install (including dbt)
+extraPipPackages:
+  - "dbt-core==1.7.0"
+  - "dbt-clickhouse==1.7.0"
+  - "dbt-trino==1.7.0"
+  - "apache-airflow-providers-dbt-cloud==3.5.0"
+  - "pandas==2.1.0"
+  - "numpy==1.24.3"
+  - "requests==2.31.0"
+
+# Node selectors and tolerations
+nodeSelector:
+  airflow-cluster: "true"
+
+tolerations:
+  - key: "airflow-cluster"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+
+# Monitoring and logging
+logs:
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClassName: gp3-retain
+
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: airflow
+    labels:
+      app: airflow
+    interval: 30s
+    path: /admin/metrics
+
+# Security context
+securityContext:
+  runAsUser: 50000
+  runAsGroup: 0
+  fsGroup: 50000
+
+# Vault integration for secrets
+extraSecrets:
+  airflow-secrets:
+    data: |
+      fernet-key: "{{ vault_secret_fernet_key }}"
+      webserver-secret: "{{ vault_secret_webserver_key }}"
+
+# Service account for Vault authentication
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT:role/airflow-service-role"
+
+# Ingress configuration (optional)
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  hosts:
+    - host: airflow.data-platform.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Resource quotas
+quotas:
+  pods: "20"
+  requests.cpu: "10"
+  requests.memory: "40Gi"
+  limits.cpu: "20"
+  limits.memory: "80Gi"

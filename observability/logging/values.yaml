@@ -1,0 +1,365 @@
+# Loki Stack Values for Centralized Logging
+# Uses latest stable versions available at deployment time
+
+# Loki configuration
+loki:
+  enabled: true
+  
+  # Latest Loki version
+  image:
+    registry: docker.io
+    repository: grafana/loki
+    tag: "2.9.4"  # Update to latest stable at deployment
+  
+  # Resource configuration for central monitoring VM
+  resources:
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+  
+  # Loki configuration
+  config:
+    auth_enabled: false
+    
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9096
+    
+    common:
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+      replication_factor: 1
+      ring:
+        instance_addr: 127.0.0.1
+        kvstore:
+          store: inmemory
+    
+    query_range:
+      results_cache:
+        cache:
+          embedded_cache:
+            enabled: true
+            max_size_mb: 100
+    
+    schema_config:
+      configs:
+        - from: 2020-10-24
+          store: boltdb-shipper
+          object_store: filesystem
+          schema: v11
+          index:
+            prefix: index_
+            period: 24h
+    
+    ruler:
+      alertmanager_url: http://alertmanager:9093
+    
+    # Table manager for retention
+    table_manager:
+      retention_deletes_enabled: true
+      retention_period: 336h  # 14 days
+    
+    # Limits configuration
+    limits_config:
+      enforce_metric_name: false
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+      ingestion_rate_mb: 16
+      ingestion_burst_size_mb: 32
+      max_query_parallelism: 32
+      max_streams_per_user: 10000
+      max_line_size: 256000
+      max_label_name_length: 1024
+      max_label_value_length: 4096
+      max_label_names_per_series: 30
+  
+  # Persistence for logs
+  persistence:
+    enabled: true
+    storageClassName: gp3-retain
+    size: 200Gi
+  
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 3100
+  
+  # ServiceMonitor for Prometheus
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    labels:
+      app: loki
+    interval: 30s
+
+# Promtail configuration for log collection
+promtail:
+  enabled: true
+  
+  # Latest Promtail version
+  image:
+    registry: docker.io
+    repository: grafana/promtail
+    tag: "2.9.4"  # Update to latest stable at deployment
+  
+  # Resource configuration
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "200m"
+      memory: "256Mi"
+  
+  # Configuration for collecting logs from all namespaces
+  config:
+    serverPort: 3101
+    lokiAddress: http://loki:3100/loki/api/v1/push
+    
+    snippets:
+      scrapeConfigs: |
+        # Pod logs
+        - job_name: kubernetes-pods
+          kubernetes_sd_configs:
+            - role: pod
+          pipeline_stages:
+            - cri: {}
+            - multiline:
+                firstline: '^\d{4}-\d{2}-\d{2}'
+                max_wait_time: 3s
+          relabel_configs:
+            - source_labels:
+                - __meta_kubernetes_pod_controller_name
+              regex: ([0-9a-z-.]+?)(-[0-9a-f]{8,10})?
+              action: replace
+              target_label: __tmp_controller_name
+            - source_labels:
+                - __meta_kubernetes_pod_label_app_kubernetes_io_name
+                - __meta_kubernetes_pod_label_app
+                - __tmp_controller_name
+                - __meta_kubernetes_pod_name
+              regex: ^;*([^;]+)(;.*)?$
+              action: replace
+              target_label: app
+            - source_labels:
+                - __meta_kubernetes_pod_label_app_kubernetes_io_instance
+                - __meta_kubernetes_pod_label_release
+              regex: ^;*([^;]+)(;.*)?$
+              action: replace
+              target_label: instance
+            - source_labels:
+                - __meta_kubernetes_pod_label_app_kubernetes_io_component
+                - __meta_kubernetes_pod_label_component
+              regex: ^;*([^;]+)(;.*)?$
+              action: replace
+              target_label: component
+            - action: replace
+              source_labels:
+              - __meta_kubernetes_pod_node_name
+              target_label: node_name
+            - action: replace
+              source_labels:
+              - __meta_kubernetes_namespace
+              target_label: namespace
+            - action: replace
+              replacement: $1
+              separator: /
+              source_labels:
+              - namespace
+              - app
+              target_label: job
+            - action: replace
+              source_labels:
+              - __meta_kubernetes_pod_name
+              target_label: pod
+            - action: replace
+              source_labels:
+              - __meta_kubernetes_pod_container_name
+              target_label: container
+            - action: replace
+              replacement: /var/log/pods/*$1/*.log
+              separator: /
+              source_labels:
+              - __meta_kubernetes_pod_uid
+              - __meta_kubernetes_pod_container_name
+              target_label: __path__
+            - action: replace
+              regex: true/(.*)
+              replacement: /var/log/pods/*$1/*.log
+              separator: /
+              source_labels:
+              - __meta_kubernetes_pod_annotationpresent_kubernetes_io_config_hash
+              - __meta_kubernetes_pod_annotation_kubernetes_io_config_hash
+              - __meta_kubernetes_pod_container_name
+              target_label: __path__
+        
+        # System logs
+        - job_name: kubernetes-nodes
+          kubernetes_sd_configs:
+            - role: node
+          relabel_configs:
+            - action: replace
+              source_labels:
+                - __meta_kubernetes_node_name
+              target_label: node_name
+            - action: replace
+              replacement: kubernetes-nodes
+              target_label: job
+            - action: replace
+              replacement: /var/log/syslog
+              target_label: __path__
+        
+        # Data platform specific log collection
+        - job_name: airflow-logs
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces:
+                names: ['airflow']
+          pipeline_stages:
+            - cri: {}
+            - regex:
+                expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) \[(?P<level>\w+)\] (?P<message>.*)'
+            - timestamp:
+                source: timestamp
+                format: '2006-01-02 15:04:05,000'
+                location: UTC
+            - labels:
+                level:
+        
+        - job_name: clickhouse-logs
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces:
+                names: ['clickhouse']
+          pipeline_stages:
+            - cri: {}
+            - regex:
+                expression: '^(?P<timestamp>\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2}\.\d{6}) \[ (?P<thread>\d+) \] \{(?P<query_id>[^}]*)\} <(?P<level>\w+)> (?P<component>[^:]+): (?P<message>.*)'
+            - timestamp:
+                source: timestamp
+                format: '2006.01.02 15:04:05.000000'
+                location: UTC
+            - labels:
+                level:
+                component:
+                query_id:
+        
+        - job_name: trino-logs
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces:
+                names: ['trino']
+          pipeline_stages:
+            - cri: {}
+            - regex:
+                expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\s+(?P<level>\w+)\s+(?P<component>[^\s]+)\s+(?P<message>.*)'
+            - timestamp:
+                source: timestamp
+                format: RFC3339
+                location: UTC
+            - labels:
+                level:
+                component:
+        
+        - job_name: airbyte-logs
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces:
+                names: ['airbyte']
+          pipeline_stages:
+            - cri: {}
+            - regex:
+                expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\s+(?P<level>\w+)\s+(?P<component>[^:]+):\s+(?P<message>.*)'
+            - timestamp:
+                source: timestamp
+                format: '2006-01-02 15:04:05.000'
+                location: UTC
+            - labels:
+                level:
+                component:
+
+  # DaemonSet configuration to run on all nodes
+  daemonset:
+    enabled: true
+  
+  # Tolerations to run on all nodes including masters
+  tolerations:
+    - key: node-role.kubernetes.io/master
+      effect: NoSchedule
+      operator: Exists
+    - key: node-role.kubernetes.io/control-plane
+      effect: NoSchedule
+      operator: Exists
+
+# Fluent Bit configuration (alternative log shipper)
+fluent-bit:
+  enabled: false  # Disabled in favor of Promtail
+  
+  # If needed, uncomment and configure
+  # image:
+  #   repository: fluent/fluent-bit
+  #   tag: "2.2.2"
+  
+  # config:
+  #   outputs: |
+  #     [OUTPUT]
+  #         Name loki
+  #         Match *
+  #         Host loki
+  #         Port 3100
+  #         Labels job=fluent-bit
+  #         auto_kubernetes_labels on
+
+# Grafana Agent for metrics and logs (alternative)
+grafana-agent:
+  enabled: false  # Disabled in favor of Promtail + Prometheus
+
+# Log retention policies
+logRetention:
+  enabled: true
+  policies:
+    - retention: "7d"
+      selector: '{level="debug"}'
+    - retention: "14d"
+      selector: '{level="info"}'
+    - retention: "30d"
+      selector: '{level="warn"}'
+    - retention: "90d"
+      selector: '{level="error"}'
+    - retention: "365d"
+      selector: '{level="fatal"}'
+
+# Alerting rules for log-based alerts
+lokiRules:
+  enabled: true
+  rules:
+    - name: error-rate
+      rules:
+        - alert: HighErrorRate
+          expr: |
+            sum(rate({namespace=~"airflow|airbyte|clickhouse|trino|superset|ranger"} |= "ERROR" [5m])) by (namespace)
+            /
+            sum(rate({namespace=~"airflow|airbyte|clickhouse|trino|superset|ranger"}[5m])) by (namespace)
+            > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High error rate in {{ $labels.namespace }}"
+            description: "Error rate is {{ $value | humanizePercentage }} in namespace {{ $labels.namespace }}"
+        
+        - alert: ApplicationDown
+          expr: |
+            absent_over_time({namespace=~"airflow|airbyte|clickhouse|trino|superset|ranger"}[5m])
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "No logs from {{ $labels.namespace }}"
+            description: "No logs received from namespace {{ $labels.namespace }} for 5 minutes"

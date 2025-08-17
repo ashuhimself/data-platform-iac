@@ -1,0 +1,377 @@
+# ClickHouse Helm Chart Values
+# Uses latest stable ClickHouse version available at deployment time
+
+# ClickHouse configuration
+image:
+  repository: clickhouse/clickhouse-server
+  tag: "23.12"  # Update to latest stable at deployment
+  pullPolicy: IfNotPresent
+
+# Cluster configuration
+cluster:
+  name: "data-platform-clickhouse"
+  
+# Sharding and replication
+shards: 2
+replicas: 2
+
+# ClickHouse server configuration
+clickhouse:
+  # Config files
+  configOverrides:
+    config.xml: |
+      <clickhouse>
+        <logger>
+          <level>information</level>
+          <console>true</console>
+          <log>/var/log/clickhouse-server/clickhouse-server.log</log>
+          <errorlog>/var/log/clickhouse-server/clickhouse-server.err.log</errorlog>
+          <size>1000M</size>
+          <count>10</count>
+        </logger>
+        
+        <http_port>8123</http_port>
+        <tcp_port>9000</tcp_port>
+        <mysql_port>9004</mysql_port>
+        <postgresql_port>9005</postgresql_port>
+        <interserver_http_port>9009</interserver_http_port>
+        
+        <listen_host>0.0.0.0</listen_host>
+        
+        <max_connections>4096</max_connections>
+        <keep_alive_timeout>3</keep_alive_timeout>
+        <max_concurrent_queries>100</max_concurrent_queries>
+        <max_server_memory_usage_to_ram_ratio>0.8</max_server_memory_usage_to_ram_ratio>
+        <uncompressed_cache_size>8589934592</uncompressed_cache_size>
+        <mark_cache_size>5368709120</mark_cache_size>
+        
+        <path>/var/lib/clickhouse/</path>
+        <tmp_path>/var/lib/clickhouse/tmp/</tmp_path>
+        <user_files_path>/var/lib/clickhouse/user_files/</user_files_path>
+        <format_schema_path>/var/lib/clickhouse/format_schemas/</format_schema_path>
+        
+        <users_config>users.xml</users_config>
+        
+        <default_profile>default</default_profile>
+        <default_database>default</default_database>
+        
+        <timezone>UTC</timezone>
+        
+        <mlock_executable>true</mlock_executable>
+        
+        <macros>
+          <cluster>data-platform-clickhouse</cluster>
+          <shard>{shard}</shard>
+          <replica>{replica}</replica>
+        </macros>
+        
+        <distributed_ddl>
+          <path>/clickhouse/task_queue/ddl</path>
+        </distributed_ddl>
+        
+        <zookeeper>
+          <node index="1">
+            <host>zookeeper-0.zookeeper-headless.clickhouse.svc.cluster.local</host>
+            <port>2181</port>
+          </node>
+          <node index="2">
+            <host>zookeeper-1.zookeeper-headless.clickhouse.svc.cluster.local</host>
+            <port>2181</port>
+          </node>
+          <node index="3">
+            <host>zookeeper-2.zookeeper-headless.clickhouse.svc.cluster.local</host>
+            <port>2181</port>
+          </node>
+        </zookeeper>
+        
+        <remote_servers>
+          <data-platform-clickhouse>
+            <shard>
+              <replica>
+                <host>clickhouse-shard0-0.clickhouse-headless.clickhouse.svc.cluster.local</host>
+                <port>9000</port>
+              </replica>
+              <replica>
+                <host>clickhouse-shard0-1.clickhouse-headless.clickhouse.svc.cluster.local</host>
+                <port>9000</port>
+              </replica>
+            </shard>
+            <shard>
+              <replica>
+                <host>clickhouse-shard1-0.clickhouse-headless.clickhouse.svc.cluster.local</host>
+                <port>9000</port>
+              </replica>
+              <replica>
+                <host>clickhouse-shard1-1.clickhouse-headless.clickhouse.svc.cluster.local</host>
+                <port>9000</port>
+              </replica>
+            </shard>
+          </data-platform-clickhouse>
+        </remote_servers>
+      </clickhouse>
+
+    users.xml: |
+      <clickhouse>
+        <profiles>
+          <default>
+            <max_memory_usage>10000000000</max_memory_usage>
+            <max_bytes_before_external_group_by>20000000000</max_bytes_before_external_group_by>
+            <max_bytes_before_external_sort>20000000000</max_bytes_before_external_sort>
+            <max_query_size>1000000</max_query_size>
+            <max_ast_depth>1000</max_ast_depth>
+            <max_ast_elements>1000000</max_ast_elements>
+            <max_expanded_ast_elements>1000000</max_expanded_ast_elements>
+            <readonly>0</readonly>
+            <allow_ddl>1</allow_ddl>
+          </default>
+          
+          <readonly>
+            <readonly>1</readonly>
+            <allow_ddl>0</allow_ddl>
+          </readonly>
+        </profiles>
+        
+        <users>
+          <default>
+            <password></password>
+            <networks incl="networks_config"/>
+            <profile>default</profile>
+            <quota>default</quota>
+          </default>
+          
+          <admin>
+            <password_sha256_hex></password_sha256_hex>
+            <networks>
+              <ip>::/0</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <access_management>1</access_management>
+          </admin>
+          
+          <analytics>
+            <password_sha256_hex></password_sha256_hex>
+            <networks>
+              <ip>::/0</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <databases>
+              <database>analytics</database>
+              <database>analytics_dev</database>
+            </databases>
+          </analytics>
+        </users>
+        
+        <quotas>
+          <default>
+            <interval>
+              <duration>3600</duration>
+              <queries>0</queries>
+              <errors>0</errors>
+              <result_rows>0</result_rows>
+              <read_rows>0</read_rows>
+              <execution_time>0</execution_time>
+            </interval>
+          </default>
+        </quotas>
+      </clickhouse>
+
+# Service configuration
+service:
+  type: LoadBalancer
+  http:
+    port: 8123
+    targetPort: 8123
+  tcp:
+    port: 9000
+    targetPort: 9000
+  mysql:
+    port: 9004
+    targetPort: 9004
+  postgresql:
+    port: 9005
+    targetPort: 9005
+
+# StatefulSet configuration
+statefulset:
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+
+# Resource configuration
+resources:
+  requests:
+    cpu: "2"
+    memory: "4Gi"
+  limits:
+    cpu: "6"
+    memory: "16Gi"
+
+# Persistence configuration
+persistence:
+  enabled: true
+  size: 200Gi
+  storageClass: gp3-retain
+  accessMode: ReadWriteOnce
+
+# ZooKeeper for coordination (required for clustering)
+zookeeper:
+  enabled: true
+  replicaCount: 3
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: gp3-retain
+  
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+
+# Node selection and tolerations
+nodeSelector:
+  clickhouse-cluster: "true"
+
+tolerations:
+  - key: "clickhouse-cluster"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+
+# Security context
+securityContext:
+  runAsUser: 101
+  runAsGroup: 101
+  fsGroup: 101
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Monitoring
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: clickhouse
+    labels:
+      app: clickhouse
+    interval: 30s
+    path: /metrics
+
+# Backup configuration
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retention: "30d"
+  s3:
+    bucket: "clickhouse-backups"
+    region: "us-west-2"
+
+# Database initialization
+initdb:
+  enabled: true
+  scripts:
+    01-create-databases.sql: |
+      CREATE DATABASE IF NOT EXISTS analytics;
+      CREATE DATABASE IF NOT EXISTS analytics_dev;
+      
+    02-create-users.sql: |
+      CREATE USER IF NOT EXISTS dbt IDENTIFIED BY 'dbt_password';
+      GRANT ALL ON analytics.* TO dbt;
+      GRANT ALL ON analytics_dev.* TO dbt;
+      
+      CREATE USER IF NOT EXISTS trino IDENTIFIED BY 'trino_password';
+      GRANT SELECT ON analytics.* TO trino;
+      GRANT SELECT ON analytics_dev.* TO trino;
+      
+      CREATE USER IF NOT EXISTS superset IDENTIFIED BY 'superset_password';
+      GRANT SELECT ON analytics.* TO superset;
+
+    03-create-tables.sql: |
+      USE analytics;
+      
+      CREATE TABLE IF NOT EXISTS events (
+        event_id UUID DEFAULT generateUUIDv4(),
+        event_name String,
+        user_id String,
+        timestamp DateTime64(3),
+        properties String
+      ) ENGINE = MergeTree()
+      ORDER BY (timestamp, user_id)
+      PARTITION BY toYYYYMM(timestamp);
+      
+      CREATE TABLE IF NOT EXISTS user_profiles (
+        user_id String,
+        email String,
+        first_name String,
+        last_name String,
+        created_at DateTime64(3),
+        updated_at DateTime64(3)
+      ) ENGINE = ReplacingMergeTree(updated_at)
+      ORDER BY user_id;
+
+# Environment variables
+env:
+  - name: CLICKHOUSE_DB
+    value: "default"
+  - name: CLICKHOUSE_USER
+    value: "default"
+  - name: CLICKHOUSE_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: clickhouse-credentials
+        key: password
+
+# Vault integration for secrets
+extraSecrets:
+  clickhouse-credentials:
+    data: |
+      password: "{{ vault_secret_clickhouse_password }}"
+      admin-password: "{{ vault_secret_clickhouse_admin_password }}"
+
+# Service account for Vault authentication
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT:role/clickhouse-service-role"
+
+# Ingress configuration (optional)
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  hosts:
+    - host: clickhouse.data-platform.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Resource quotas
+quotas:
+  pods: "10"
+  requests.cpu: "8"
+  requests.memory: "32Gi"
+  limits.cpu: "24"
+  limits.memory: "64Gi"
+
+# Anti-affinity rules
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values:
+            - clickhouse
+        topologyKey: kubernetes.io/hostname

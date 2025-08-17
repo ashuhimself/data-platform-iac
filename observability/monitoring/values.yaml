@@ -1,0 +1,521 @@
+# Prometheus Stack (kube-prometheus-stack) Values
+# Uses latest stable versions available at deployment time
+
+# Global configuration
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+# Prometheus configuration
+prometheus:
+  enabled: true
+  prometheusSpec:
+    # Latest Prometheus version
+    image:
+      registry: quay.io
+      repository: prometheus/prometheus
+      tag: "v2.48.1"  # Update to latest stable at deployment
+    
+    # Resource configuration for central monitoring VM
+    resources:
+      requests:
+        cpu: "2"
+        memory: "4Gi"
+      limits:
+        cpu: "4"
+        memory: "8Gi"
+    
+    # Storage configuration
+    retention: 15d
+    retentionSize: "200GiB"
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3-retain
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 250Gi
+    
+    # Service discovery across all clusters
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    
+    # External labels for federation
+    externalLabels:
+      cluster: "dataplatform"
+      environment: "production"
+    
+    # Remote write configuration (optional for long-term storage)
+    remoteWrite: []
+    
+    # Scrape configuration for all data platform services
+    additionalScrapeConfigs:
+      - job_name: 'airflow'
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: ['airflow']
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: 'airflow-webserver'
+      
+      - job_name: 'clickhouse'
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: ['clickhouse']
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: 'clickhouse-service'
+      
+      - job_name: 'trino'
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: ['trino']
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: 'trino-coordinator'
+      
+      - job_name: 'superset'
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: ['superset']
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: 'superset'
+      
+      - job_name: 'ranger'
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: ['ranger']
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: 'ranger-admin'
+      
+      - job_name: 'vault'
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: ['vault']
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: 'vault'
+      
+      - job_name: 'airbyte'
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: ['airbyte']
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: 'airbyte-server-svc|airbyte-webapp-svc'
+
+# Grafana configuration
+grafana:
+  enabled: true
+  
+  # Latest Grafana version
+  image:
+    registry: docker.io
+    repository: grafana/grafana
+    tag: "10.2.3"  # Update to latest stable at deployment
+  
+  # Resource configuration
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+  
+  # Admin credentials from Vault
+  admin:
+    existingSecret: "grafana-credentials"
+    userKey: admin-user
+    passwordKey: admin-password
+  
+  # Grafana configuration
+  grafana.ini:
+    server:
+      domain: grafana.dataplatform.local
+      root_url: https://grafana.dataplatform.local
+      enforce_domain: false
+    
+    auth:
+      disable_login_form: false
+      disable_signout_menu: false
+    
+    auth.anonymous:
+      enabled: false
+    
+    database:
+      type: postgres
+      host: grafana-postgresql:5432
+      name: grafana
+      user: grafana
+      password: $__file{/etc/secrets/db_password}
+    
+    security:
+      admin_user: admin
+      admin_password: $__file{/etc/secrets/admin_password}
+      secret_key: $__file{/etc/secrets/secret_key}
+    
+    smtp:
+      enabled: true
+      host: $__file{/etc/secrets/smtp_host}
+      user: $__file{/etc/secrets/smtp_user}
+      password: $__file{/etc/secrets/smtp_password}
+      from_address: grafana@dataplatform.local
+      from_name: Data Platform Grafana
+  
+  # External secrets from Vault
+  extraSecretMounts:
+    - name: grafana-secrets
+      secretName: grafana-vault-secrets
+      defaultMode: 0440
+      mountPath: /etc/secrets
+      readOnly: true
+  
+  # Persistence
+  persistence:
+    enabled: true
+    storageClassName: gp3-retain
+    size: 10Gi
+  
+  # Service configuration
+  service:
+    enabled: true
+    type: LoadBalancer
+    port: 80
+    targetPort: 3000
+  
+  # Ingress configuration
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    hosts:
+      - grafana.dataplatform.local
+    tls:
+      - secretName: grafana-tls
+        hosts:
+          - grafana.dataplatform.local
+  
+  # Pre-configured dashboards
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+      - name: 'dataplatform'
+        orgId: 1
+        folder: 'Data Platform'
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/dataplatform
+  
+  # Data sources
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus-operated:9090
+        access: proxy
+        isDefault: true
+      - name: Loki
+        type: loki
+        url: http://loki:3100
+        access: proxy
+      - name: ClickHouse
+        type: clickhouse
+        url: http://clickhouse-service.clickhouse.svc.cluster.local:8123
+        access: proxy
+        database: analytics
+        user: grafana
+        password: ${CLICKHOUSE_PASSWORD}
+      - name: Trino
+        type: trino
+        url: http://trino-coordinator.trino.svc.cluster.local:8080
+        access: proxy
+        user: grafana
+      - name: Airbyte
+        type: postgres
+        url: airbyte-postgresql.airbyte.svc.cluster.local:5432
+        access: proxy
+        database: airbyte
+        user: airbyte
+        password: ${AIRBYTE_DATABASE_PASSWORD}
+
+# AlertManager configuration
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    # Latest AlertManager version
+    image:
+      registry: quay.io
+      repository: prometheus/alertmanager
+      tag: "v0.26.0"  # Update to latest stable at deployment
+    
+    # Resource configuration
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "1Gi"
+    
+    # Storage
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3-retain
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+    
+    # External URL
+    externalUrl: https://alertmanager.dataplatform.local
+    
+    # Configuration
+    config:
+      global:
+        smtp_smarthost: 'smtp.dataplatform.local:587'
+        smtp_from: 'alerts@dataplatform.local'
+        slack_api_url_file: '/etc/secrets/slack_webhook_url'
+      
+      route:
+        group_by: ['alertname', 'cluster', 'service']
+        group_wait: 10s
+        group_interval: 10s
+        repeat_interval: 1h
+        receiver: 'default'
+        routes:
+        - match:
+            severity: critical
+          receiver: 'critical-alerts'
+        - match:
+            service: airflow
+          receiver: 'airflow-team'
+        - match:
+            service: clickhouse
+          receiver: 'data-team'
+        - match:
+            service: trino
+          receiver: 'data-team'
+      
+      receivers:
+      - name: 'default'
+        email_configs:
+        - to: 'admin@dataplatform.local'
+          subject: 'Data Platform Alert: {{ .GroupLabels.alertname }}'
+          body: |
+            {{ range .Alerts }}
+            Alert: {{ .Annotations.summary }}
+            Description: {{ .Annotations.description }}
+            {{ end }}
+      
+      - name: 'critical-alerts'
+        slack_configs:
+        - channel: '#critical-alerts'
+          title: 'Critical Alert: {{ .GroupLabels.alertname }}'
+          text: |
+            {{ range .Alerts }}
+            {{ .Annotations.summary }}
+            {{ .Annotations.description }}
+            {{ end }}
+        email_configs:
+        - to: 'admin@dataplatform.local'
+          subject: 'CRITICAL: {{ .GroupLabels.alertname }}'
+      
+      - name: 'airflow-team'
+        slack_configs:
+        - channel: '#airflow-alerts'
+          title: 'Airflow Alert: {{ .GroupLabels.alertname }}'
+      
+      - name: 'data-team'
+        slack_configs:
+        - channel: '#data-alerts'
+          title: 'Data Platform Alert: {{ .GroupLabels.alertname }}'
+
+# Node Exporter
+nodeExporter:
+  enabled: true
+
+# Kube State Metrics
+kubeStateMetrics:
+  enabled: true
+
+# CoreDNS monitoring
+coreDns:
+  enabled: true
+
+# ETCD monitoring
+kubeEtcd:
+  enabled: true
+
+# Controller Manager monitoring
+kubeControllerManager:
+  enabled: true
+
+# Scheduler monitoring
+kubeScheduler:
+  enabled: true
+
+# Proxy monitoring
+kubeProxy:
+  enabled: true
+
+# Kubelet monitoring
+kubelet:
+  enabled: true
+
+# Default rules
+defaultRules:
+  create: true
+  rules:
+    alertmanager: true
+    etcd: true
+    configReloaders: true
+    general: true
+    k8s: true
+    kubeApiserverAvailability: true
+    kubeApiserverBurnrate: true
+    kubeApiserverHistogram: true
+    kubeApiserverSlos: true
+    kubelet: true
+    kubeProxy: true
+    kubePrometheusGeneral: true
+    kubePrometheusNodeRecording: true
+    kubernetesApps: true
+    kubernetesResources: true
+    kubernetesStorage: true
+    kubernetesSystem: true
+    kubeScheduler: true
+    kubeStateMetrics: true
+    network: true
+    node: true
+    nodeExporterAlerting: true
+    nodeExporterRecording: true
+    prometheus: true
+    prometheusOperator: true
+
+# Custom PrometheusRules for data platform services
+additionalPrometheusRules:
+  - name: dataplatform-rules
+    groups:
+    - name: airflow
+      rules:
+      - alert: AirflowDown
+        expr: up{job="airflow"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: airflow
+        annotations:
+          summary: "Airflow is down"
+          description: "Airflow has been down for more than 5 minutes"
+      
+      - alert: AirflowDagFailures
+        expr: increase(airflow_dag_run_failed_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: airflow
+        annotations:
+          summary: "Airflow DAG failures detected"
+          description: "{{ $value }} DAG runs have failed in the last 5 minutes"
+    
+    - name: clickhouse
+      rules:
+      - alert: ClickHouseDown
+        expr: up{job="clickhouse"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: clickhouse
+        annotations:
+          summary: "ClickHouse is down"
+          description: "ClickHouse has been down for more than 5 minutes"
+      
+      - alert: ClickHouseHighQueryLatency
+        expr: histogram_quantile(0.95, clickhouse_query_duration_seconds_bucket) > 30
+        for: 5m
+        labels:
+          severity: warning
+          service: clickhouse
+        annotations:
+          summary: "ClickHouse high query latency"
+          description: "95th percentile query latency is {{ $value }}s"
+    
+    - name: trino
+      rules:
+      - alert: TrinoDown
+        expr: up{job="trino"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: trino
+        annotations:
+          summary: "Trino is down"
+          description: "Trino has been down for more than 5 minutes"
+      
+      - alert: TrinoHighFailureRate
+        expr: rate(trino_query_failed_total[5m]) / rate(trino_query_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: trino
+        annotations:
+          summary: "Trino high query failure rate"
+          description: "Query failure rate is {{ $value | humanizePercentage }}"
+    
+    - name: airbyte
+      rules:
+      - alert: AirbyteDown
+        expr: up{job="airbyte"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: airbyte
+        annotations:
+          summary: "Airbyte is down"
+          description: "Airbyte has been down for more than 5 minutes"
+      
+      - alert: AirbyteSyncFailures
+        expr: increase(airbyte_sync_failed_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: airbyte
+        annotations:
+          summary: "Airbyte sync failures detected"
+          description: "{{ $value }} sync jobs have failed in the last 5 minutes"
+      
+      - alert: AirbyteHighResourceUsage
+        expr: (airbyte_worker_cpu_usage_percent > 80) or (airbyte_worker_memory_usage_percent > 80)
+        for: 10m
+        labels:
+          severity: warning
+          service: airbyte
+        annotations:
+          summary: "Airbyte high resource usage"
+          description: "Airbyte worker resource usage is above 80% for more than 10 minutes"

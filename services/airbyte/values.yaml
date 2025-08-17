@@ -1,0 +1,533 @@
+# Airbyte Helm Chart Values
+# Uses latest stable Airbyte version available at deployment time
+
+# Global configuration
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  edition: "community"  # community or pro
+  serviceAccountName: "airbyte-admin"
+
+# Airbyte configuration
+version: "0.50.33"  # Update to latest stable at deployment
+
+# Web application (UI)
+webapp:
+  replicaCount: 2
+  image:
+    repository: airbyte/webapp
+    tag: "0.50.33"  # Update to latest stable at deployment
+    pullPolicy: IfNotPresent
+  
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "1500m"
+      memory: "2Gi"
+  
+  service:
+    type: LoadBalancer
+    port: 80
+    targetPort: 80
+    annotations: {}
+  
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    hosts:
+      - host: airbyte.dataplatform.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: airbyte-tls
+        hosts:
+          - airbyte.dataplatform.local
+  
+  env:
+    - name: AIRBYTE_VERSION
+      value: "0.50.33"
+    - name: API_URL
+      value: "/api/v1/"
+    - name: INTERNAL_API_HOST
+      value: "airbyte-server-svc:8001"
+    - name: CONNECTOR_BUILDER_API_HOST
+      value: "airbyte-connector-builder-server-svc:80"
+
+# Server (API backend)
+server:
+  replicaCount: 2
+  image:
+    repository: airbyte/server
+    tag: "0.50.33"  # Update to latest stable at deployment
+    pullPolicy: IfNotPresent
+  
+  resources:
+    requests:
+      cpu: "1000m"
+      memory: "2Gi"
+    limits:
+      cpu: "3000m"
+      memory: "4Gi"
+  
+  service:
+    type: ClusterIP
+    port: 8001
+    targetPort: 8001
+  
+  env:
+    - name: AIRBYTE_VERSION
+      value: "0.50.33"
+    - name: CONFIG_ROOT
+      value: "/configs"
+    - name: DATABASE_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: airbyte-secrets
+          key: database-password
+    - name: DATABASE_URL
+      value: "jdbc:postgresql://airbyte-postgresql:5432/airbyte"
+    - name: DATABASE_USER
+      value: "airbyte"
+    - name: LOG_LEVEL
+      value: "INFO"
+    - name: JOB_MAIN_CONTAINER_CPU_LIMIT
+      value: "2"
+    - name: JOB_MAIN_CONTAINER_CPU_REQUEST
+      value: "0.5"
+    - name: JOB_MAIN_CONTAINER_MEMORY_LIMIT
+      value: "4Gi"
+    - name: JOB_MAIN_CONTAINER_MEMORY_REQUEST
+      value: "1Gi"
+    - name: JOBS_DATABASE_MINIMUM_FLYWAY_MIGRATION_VERSION
+      value: "0.35.15.001"
+    - name: LOCAL_ROOT
+      value: "/tmp/airbyte_local"
+    - name: RUN_DATABASE_MIGRATION_ON_STARTUP
+      value: "true"
+    - name: SECRET_PERSISTENCE
+      value: "NONE"
+    - name: TEMPORAL_HOST
+      value: "airbyte-temporal:7233"
+    - name: TRACKING_STRATEGY
+      value: "segment"
+    - name: WEBAPP_URL
+      value: "http://airbyte-webapp-svc"
+    - name: WORKER_ENVIRONMENT
+      value: "kubernetes"
+    - name: WORKSPACE_ROOT
+      value: "/tmp/workspace"
+
+# Worker (job orchestration)
+worker:
+  replicaCount: 3
+  image:
+    repository: airbyte/worker
+    tag: "0.50.33"  # Update to latest stable at deployment
+    pullPolicy: IfNotPresent
+  
+  resources:
+    requests:
+      cpu: "1000m"
+      memory: "2Gi"
+    limits:
+      cpu: "4000m"
+      memory: "8Gi"
+  
+  env:
+    - name: AIRBYTE_VERSION
+      value: "0.50.33"
+    - name: AUTO_DETECT_SCHEMA
+      value: "true"
+    - name: DATABASE_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: airbyte-secrets
+          key: database-password
+    - name: DATABASE_URL
+      value: "jdbc:postgresql://airbyte-postgresql:5432/airbyte"
+    - name: DATABASE_USER
+      value: "airbyte"
+    - name: JOB_MAIN_CONTAINER_CPU_LIMIT
+      value: "4"
+    - name: JOB_MAIN_CONTAINER_CPU_REQUEST
+      value: "1"
+    - name: JOB_MAIN_CONTAINER_MEMORY_LIMIT
+      value: "8Gi"
+    - name: JOB_MAIN_CONTAINER_MEMORY_REQUEST
+      value: "2Gi"
+    - name: LOCAL_ROOT
+      value: "/tmp/airbyte_local"
+    - name: LOG_LEVEL
+      value: "INFO"
+    - name: MAX_CHECK_WORKERS
+      value: "5"
+    - name: MAX_DISCOVER_WORKERS
+      value: "5"
+    - name: MAX_SPEC_WORKERS
+      value: "5"
+    - name: MAX_SYNC_WORKERS
+      value: "5"
+    - name: TEMPORAL_HOST
+      value: "airbyte-temporal:7233"
+    - name: WORKSPACE_ROOT
+      value: "/tmp/workspace"
+
+# Temporal (workflow engine)
+temporal:
+  enabled: true
+  image:
+    repository: airbyte/temporal
+    tag: "0.50.33"  # Update to latest stable at deployment
+    pullPolicy: IfNotPresent
+  
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2000m"
+      memory: "4Gi"
+  
+  service:
+    type: ClusterIP
+    port: 7233
+    targetPort: 7233
+  
+  env:
+    - name: DB
+      value: "postgresql"
+    - name: DB_PORT
+      value: "5432"
+    - name: POSTGRES_PWD
+      valueFrom:
+        secretKeyRef:
+          name: airbyte-secrets
+          key: database-password
+    - name: POSTGRES_SEEDS
+      value: "airbyte-postgresql"
+    - name: POSTGRES_USER
+      value: "airbyte"
+    - name: DYNAMIC_CONFIG_FILE_PATH
+      value: "config/dynamicconfig/development.yaml"
+
+# Bootloader (initialization)
+bootloader:
+  image:
+    repository: airbyte/bootloader
+    tag: "0.50.33"  # Update to latest stable at deployment
+    pullPolicy: IfNotPresent
+  
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+
+# Connector Builder Server
+connectorBuilderServer:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: airbyte/connector-builder-server
+    tag: "0.50.33"  # Update to latest stable at deployment
+    pullPolicy: IfNotPresent
+  
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+  
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 80
+
+# Cron jobs
+cron:
+  enabled: true
+  image:
+    repository: airbyte/cron
+    tag: "0.50.33"  # Update to latest stable at deployment
+    pullPolicy: IfNotPresent
+  
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "1Gi"
+
+# PostgreSQL database
+postgresql:
+  enabled: true
+  auth:
+    enablePostgresUser: true
+    postgresPassword: "airbytedb123"
+    username: "airbyte"
+    password: "airbyte123"
+    database: "airbyte"
+  
+  primary:
+    resources:
+      requests:
+        cpu: "1000m"
+        memory: "2Gi"
+      limits:
+        cpu: "2000m"
+        memory: "4Gi"
+    
+    persistence:
+      enabled: true
+      storageClass: gp3-retain
+      size: 100Gi
+    
+    configuration: |
+      max_connections = 200
+      shared_buffers = 512MB
+      effective_cache_size = 2GB
+      maintenance_work_mem = 128MB
+      checkpoint_completion_target = 0.9
+      wal_buffers = 16MB
+      default_statistics_target = 100
+      random_page_cost = 1.1
+      effective_io_concurrency = 200
+      work_mem = 8MB
+      min_wal_size = 2GB
+      max_wal_size = 8GB
+      max_worker_processes = 8
+      max_parallel_workers_per_gather = 4
+      max_parallel_workers = 8
+
+# MinIO (S3-compatible storage for logs and state)
+minio:
+  enabled: true
+  auth:
+    rootUser: "airbyte"
+    rootPassword: "airbyte123"
+  
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+  
+  persistence:
+    enabled: true
+    storageClass: gp3-retain
+    size: 200Gi
+  
+  service:
+    type: ClusterIP
+    ports:
+      api: 9000
+      console: 9001
+
+# Jobs configuration
+jobs:
+  resources:
+    requests:
+      cpu: "1000m"
+      memory: "2Gi"
+    limits:
+      cpu: "4000m"
+      memory: "8Gi"
+  
+  kube:
+    # Node selection for job pods
+    nodeSelector:
+      airbyte-cluster: "true"
+    
+    # Tolerations for job pods
+    tolerations:
+      - key: "airbyte-cluster"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+    
+    # Main container configuration
+    main_container_image_pull_secret: ""
+    sidecar_container_image_pull_secret: ""
+    
+    # Storage configuration
+    storage:
+      type: "minio"
+      minio:
+        endpoint: "http://airbyte-minio:9000"
+        bucket: "airbyte-dev-logs"
+        access_key: "airbyte"
+        secret_key: "airbyte123"
+
+# Metrics and monitoring
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    labels:
+      app: airbyte
+    interval: 30s
+
+# Logging configuration
+logs:
+  accessLog:
+    enabled: true
+  s3:
+    enabled: false
+  minio:
+    enabled: true
+    endpoint: "http://airbyte-minio:9000"
+    bucket: "airbyte-dev-logs"
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Node selection and tolerations
+nodeSelector:
+  airbyte-cluster: "true"
+
+tolerations:
+  - key: "airbyte-cluster"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+
+# Anti-affinity rules
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values:
+            - airbyte
+        topologyKey: kubernetes.io/hostname
+
+# Service account
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT:role/airbyte-service-role"
+  name: "airbyte-admin"
+
+# Network policies
+networkPolicy:
+  enabled: false
+
+# Autoscaling
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Persistence for workspace
+persistence:
+  enabled: true
+  storageClass: gp3-retain
+  accessMode: ReadWriteMany
+  size: 500Gi
+
+# Extra environment variables
+extraEnv:
+  - name: SEGMENT_WRITE_KEY
+    value: ""
+  - name: LAUNCHDARKLY_KEY
+    value: ""
+  - name: OTEL_COLLECTOR_ENDPOINT
+    value: "http://jaeger-collector:14268/api/traces"
+
+# External secrets from Vault
+externalSecrets:
+  enabled: true
+  secretStore:
+    type: "vault"
+    vault:
+      server: "https://vault.vault.svc.cluster.local:8200"
+      path: "secret/data/airbyte"
+      version: "v2"
+
+# Resources for different components
+resources:
+  webapp:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "1500m"
+      memory: "2Gi"
+  
+  server:
+    requests:
+      cpu: "1000m"
+      memory: "2Gi"
+    limits:
+      cpu: "3000m"
+      memory: "4Gi"
+  
+  worker:
+    requests:
+      cpu: "1000m"
+      memory: "2Gi"
+    limits:
+      cpu: "4000m"
+      memory: "8Gi"
+  
+  temporal:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2000m"
+      memory: "4Gi"
+
+# Health checks
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 60
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Connector catalog
+connectorCatalog:
+  enabled: true
+  url: "https://connectors.airbyte.com/files/registries/v0/oss_registry.json"

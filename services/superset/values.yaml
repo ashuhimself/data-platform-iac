@@ -1,0 +1,220 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+image:
+  repository: apache/superset
+  tag: "3.1.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 8088
+  targetPort: 8088
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  hosts:
+    - host: superset.dataplatform.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: superset-tls
+      hosts:
+        - superset.dataplatform.local
+
+resources:
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+  requests:
+    cpu: 1000m
+    memory: 2Gi
+
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 10Gi
+
+postgresql:
+  enabled: true
+  auth:
+    enablePostgresUser: true
+    postgresPassword: "supersetdb123"
+    username: "superset"
+    password: "superset123"
+    database: "superset"
+  primary:
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+    persistence:
+      enabled: true
+      size: 20Gi
+
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    password: "redis123"
+  master:
+    resources:
+      limits:
+        cpu: 500m
+        memory: 1Gi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+    persistence:
+      enabled: true
+      size: 8Gi
+
+supersetNode:
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+
+supersetWorker:
+  replicaCount: 2
+  resources:
+    limits:
+      cpu: 1500m
+      memory: 3Gi
+    requests:
+      cpu: 750m
+      memory: 1.5Gi
+
+supersetCeleryBeat:
+  enabled: true
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
+env:
+  SUPERSET_SECRET_KEY: "your-secret-key-change-me"
+  SUPERSET_LOAD_EXAMPLES: "yes"
+
+configOverrides:
+  secret: |
+    SECRET_KEY = 'your-secret-key-change-me'
+    SQLALCHEMY_DATABASE_URI = 'postgresql://superset:superset123@superset-postgresql:5432/superset'
+    CELERY_CONFIG = {
+        'broker_url': 'redis://:redis123@superset-redis-master:6379/0',
+        'result_backend': 'redis://:redis123@superset-redis-master:6379/0'
+    }
+    
+    # Custom database connections for data sources
+    SQLALCHEMY_CUSTOM_PASSWORD_STORE = lambda user, password, url: True
+    
+    # Enable OAuth if needed
+    # from flask_appbuilder.security.manager import AUTH_OAUTH
+    # AUTH_TYPE = AUTH_OAUTH
+    
+    # Feature flags
+    FEATURE_FLAGS = {
+        "ENABLE_TEMPLATE_PROCESSING": True,
+        "DASHBOARD_NATIVE_FILTERS": True,
+        "DASHBOARD_CROSS_FILTERS": True,
+        "GLOBAL_ASYNC_QUERIES": True,
+        "VERSIONED_EXPORT": True
+    }
+
+  config: |
+    from superset.security import SupersetSecurityManager
+    
+    class CustomSecurityManager(SupersetSecurityManager):
+        pass
+    
+    CUSTOM_SECURITY_MANAGER = CustomSecurityManager
+
+init:
+  enabled: true
+  adminUser:
+    username: admin
+    firstname: Admin
+    lastname: User
+    email: admin@dataplatform.local
+    password: admin123
+
+affinity: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 60
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  labels:
+    app: superset
+  interval: 30s
+  path: /metrics
+
+networkPolicy:
+  enabled: false
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8088
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8088

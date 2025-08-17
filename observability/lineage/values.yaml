@@ -1,0 +1,338 @@
+# Marquez (OpenLineage) Values for Data Lineage Tracking
+# Uses latest stable versions available at deployment time
+
+# Marquez configuration
+marquez:
+  # Latest Marquez version
+  image:
+    registry: docker.io
+    repository: marquezproject/marquez
+    tag: "0.43.0"  # Update to latest stable at deployment
+    pullPolicy: IfNotPresent
+  
+  # Resource configuration for central monitoring VM
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+  
+  # Marquez configuration
+  config:
+    # Database configuration
+    database:
+      type: "postgresql"
+      host: "marquez-postgresql"
+      port: 5432
+      name: "marquez"
+      username: "marquez"
+      password: "marquez123"  # Should come from Vault in production
+    
+    # Logging configuration
+    logging:
+      level: "INFO"
+      appenders:
+        - type: "console"
+          threshold: "INFO"
+          target: "stdout"
+          logFormat: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    
+    # Server configuration
+    server:
+      applicationConnectors:
+        - type: "http"
+          port: 5000
+          bindHost: "0.0.0.0"
+      adminConnectors:
+        - type: "http"
+          port: 5001
+          bindHost: "0.0.0.0"
+    
+    # Metrics configuration
+    metrics:
+      reporters:
+        - type: "prometheus"
+          port: 5002
+    
+    # CORS configuration
+    cors:
+      enabled: true
+      allowedOrigins: ["*"]
+      allowedHeaders: ["*"]
+      allowedMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  
+  # Service configuration
+  service:
+    type: ClusterIP
+    ports:
+      - name: http
+        port: 5000
+        targetPort: 5000
+        protocol: TCP
+      - name: admin
+        port: 5001
+        targetPort: 5001
+        protocol: TCP
+      - name: metrics
+        port: 5002
+        targetPort: 5002
+        protocol: TCP
+  
+  # Environment variables
+  env:
+    - name: MARQUEZ_CONFIG
+      value: "/marquez/config.yml"
+    - name: MARQUEZ_HOST
+      value: "0.0.0.0"
+    - name: MARQUEZ_PORT
+      value: "5000"
+    - name: POSTGRES_HOST
+      value: "marquez-postgresql"
+    - name: POSTGRES_PORT
+      value: "5432"
+    - name: POSTGRES_DB
+      value: "marquez"
+    - name: POSTGRES_USER
+      value: "marquez"
+    - name: POSTGRES_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: marquez-database-secret
+          key: password
+
+# Marquez Web UI configuration
+marquezWeb:
+  enabled: true
+  
+  # Latest Marquez Web version
+  image:
+    registry: docker.io
+    repository: marquezproject/marquez-web
+    tag: "0.43.0"  # Update to latest stable at deployment
+    pullPolicy: IfNotPresent
+  
+  # Resource configuration
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "1Gi"
+  
+  # Configuration
+  config:
+    marquez:
+      host: "marquez"
+      port: 5000
+  
+  # Service configuration
+  service:
+    type: LoadBalancer
+    port: 3000
+    targetPort: 3000
+  
+  # Ingress configuration
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    hosts:
+      - host: lineage.dataplatform.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: marquez-tls
+        hosts:
+          - lineage.dataplatform.local
+
+# PostgreSQL for Marquez metadata storage
+postgresql:
+  enabled: true
+  auth:
+    enablePostgresUser: true
+    postgresPassword: "marquezdb123"
+    username: "marquez"
+    password: "marquez123"
+    database: "marquez"
+  
+  # Resource configuration
+  primary:
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "1"
+        memory: "2Gi"
+    
+    # Persistence
+    persistence:
+      enabled: true
+      storageClass: gp3-retain
+      size: 50Gi
+    
+    # Configuration
+    configuration: |
+      max_connections = 200
+      shared_buffers = 256MB
+      effective_cache_size = 1GB
+      maintenance_work_mem = 64MB
+      checkpoint_completion_target = 0.9
+      wal_buffers = 16MB
+      default_statistics_target = 100
+      random_page_cost = 1.1
+      effective_io_concurrency = 200
+      work_mem = 4MB
+      min_wal_size = 1GB
+      max_wal_size = 4GB
+
+# OpenLineage Spark integration
+openlineage:
+  spark:
+    enabled: true
+    # Configuration for Spark jobs to send lineage to Marquez
+    config: |
+      spark.openlineage.transport.type=http
+      spark.openlineage.transport.url=http://marquez.observability.svc.cluster.local:5000
+      spark.openlineage.namespace=spark
+      spark.openlineage.parentJobName=airflow
+      spark.openlineage.parentRunId=${AIRFLOW_RUN_ID}
+  
+  airflow:
+    enabled: true
+    # Configuration for Airflow integration
+    config: |
+      OPENLINEAGE_URL=http://marquez.observability.svc.cluster.local:5000
+      OPENLINEAGE_NAMESPACE=airflow
+      OPENLINEAGE_PRODUCER=airflow
+
+# ServiceMonitor for Prometheus metrics collection
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  labels:
+    app: marquez
+  interval: 30s
+  path: /metrics
+  port: metrics
+
+# Persistent volumes for lineage data
+persistence:
+  enabled: true
+  storageClass: gp3-retain
+  accessMode: ReadWriteOnce
+  size: 100Gi
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Node selection
+nodeSelector:
+  monitoring-node: "true"
+
+# Tolerations for monitoring nodes
+tolerations:
+  - key: "monitoring-node"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+
+# Anti-affinity rules
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values:
+            - marquez
+        topologyKey: kubernetes.io/hostname
+
+# Liveness and readiness probes
+livenessProbe:
+  httpGet:
+    path: /api/v1/namespaces
+    port: http
+  initialDelaySeconds: 60
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /api/v1/namespaces
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Airflow DAG for lineage data cleanup
+cleanup:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retentionDays: 90
+  
+# Integration configurations for data platform services
+integrations:
+  airflow:
+    enabled: true
+    namespace: "airflow"
+    connection: "http://marquez.observability.svc.cluster.local:5000"
+  
+  spark:
+    enabled: true
+    namespace: "spark"
+    properties: |
+      spark.openlineage.transport.type=http
+      spark.openlineage.transport.url=http://marquez.observability.svc.cluster.local:5000
+      spark.openlineage.namespace=spark
+  
+  dbt:
+    enabled: true
+    namespace: "dbt"
+    config: |
+      openlineage:
+        transport:
+          type: http
+          url: http://marquez.observability.svc.cluster.local:5000
+        namespace: dbt
+        job_name: dbt_transformation
+  
+  trino:
+    enabled: true
+    namespace: "trino"
+    listener: "io.openlineage.trino.OpenLineageEventListener"
+    config: |
+      openlineage.transport.type=http
+      openlineage.transport.url=http://marquez.observability.svc.cluster.local:5000
+      openlineage.namespace=trino
+
+# Backup configuration
+backup:
+  enabled: false
+  schedule: "0 1 * * *"  # Daily at 1 AM
+  retention: "30d"
+  storage:
+    type: "s3"
+    bucket: "marquez-backups"
+    region: "us-east-1"
